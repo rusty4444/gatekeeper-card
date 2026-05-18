@@ -1,8 +1,12 @@
-# Gatekeeper Guest Portal — Lovelace Card
+<p align="center">
+  <img src="assets/logo.png" alt="Gatekeeper Guest Portal" width="320">
+</p>
 
-A **Lovelace dashboard card** for [Gatekeeper HA](https://github.com/rusty4444/gatekeeper-ha) that provides a full UI for managing guest access tokens and toggling guest mode — all from your Home Assistant dashboard.
+<h1 align="center">Gatekeeper Guest Portal — Lovelace Card</h1>
 
-![Screenshot placeholder](./assets/screenshot.png)
+<p align="center"><strong>A Lovelace dashboard card for <a href="https://github.com/rusty4444/gatekeeper-ha">Gatekeeper HA</a> that provides a full UI for managing guest access tokens and toggling guest mode — all from your Home Assistant dashboard.</strong></p>
+
+![Gatekeeper Guest Portal Screenshot](assets/screenshot.png)
 
 ## Features
 
