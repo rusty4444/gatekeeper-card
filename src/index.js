@@ -12,6 +12,8 @@
  *   title: "Guest Access"
  *   show_qr: true
  *   default_duration: 24
+ *   mode_entity: binary_sensor.guest_mode_active
+ *   auto_disable_after: 0       # optional; if unset, integration default applies
  */
 
 // Lit is imported from npm and bundled by rollup (see rollup.config.js).
@@ -21,6 +23,8 @@
 import { LitElement, html, css } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import QRCode from 'qrcode';
+
+const SECRET_REVEAL_TIMEOUT_MS = 60_000;
 
 class GatekeeperCard extends LitElement {
   static get properties() {
@@ -34,8 +38,10 @@ class GatekeeperCard extends LitElement {
       _qrSvg: { type: String },
       _loading: { type: Boolean },
       _newToken: { type: Object },
+      _secretRevealed: { type: Boolean },
       _showCreateForm: { type: Boolean },
       _error: { type: String },
+      _info: { type: String },
     };
   }
 
@@ -49,8 +55,13 @@ class GatekeeperCard extends LitElement {
     this._loadingCount = 0;
     this._loading = false;
     this._newToken = null;
+    this._secretRevealed = false;
     this._showCreateForm = false;
     this._error = '';
+    this._info = '';
+    this._eventUnsubs = [];
+    this._secretClearTimer = null;
+    this._initialLoadDone = false;
   }
 
   _setLoading(active) {
@@ -59,8 +70,64 @@ class GatekeeperCard extends LitElement {
   }
 
   set hass(hass) {
+    const prev = this._hass;
     this._hass = hass;
-    this._refresh();
+
+    // Pick up local-only mode state changes (binary_sensor) without a service call.
+    this._readModeStateFromHass();
+
+    // First time we receive hass: do one initial load + subscribe to events.
+    if (!prev) {
+      this._refresh();
+      this._subscribeToEvents();
+    }
+  }
+
+  connectedCallback() {
+    super.connectedCallback();
+    // If we re-attach after detach, re-subscribe.
+    if (this._hass && this._eventUnsubs.length === 0) {
+      this._subscribeToEvents();
+    }
+  }
+
+  disconnectedCallback() {
+    super.disconnectedCallback();
+    this._unsubscribeFromEvents();
+    if (this._secretClearTimer) {
+      clearTimeout(this._secretClearTimer);
+      this._secretClearTimer = null;
+    }
+  }
+
+  async _subscribeToEvents() {
+    if (!this._hass?.connection) return;
+    const events = [
+      'gatekeeper_token_created',
+      'gatekeeper_token_revoked',
+      'gatekeeper_mode_started',
+      'gatekeeper_mode_ended',
+    ];
+    try {
+      for (const ev of events) {
+        const unsub = await this._hass.connection.subscribeEvents(
+          () => this._refresh(),
+          ev,
+        );
+        this._eventUnsubs.push(unsub);
+      }
+    } catch (e) {
+      // If event subscription fails (older HA, missing perms), the user can
+      // still hit the manual Refresh button.
+      this._error = 'Event subscription failed: ' + e.message;
+    }
+  }
+
+  _unsubscribeFromEvents() {
+    for (const unsub of this._eventUnsubs) {
+      try { unsub(); } catch { /* ignore */ }
+    }
+    this._eventUnsubs = [];
   }
 
   setConfig(config) {
@@ -68,8 +135,29 @@ class GatekeeperCard extends LitElement {
       title: 'Guest Access',
       show_qr: true,
       default_duration: 24,
+      mode_entity: 'binary_sensor.guest_mode_active',
+      // auto_disable_after intentionally omitted — only sent if user sets it.
       ...config,
     };
+  }
+
+  _readModeStateFromHass() {
+    if (!this._hass || !this._config) return;
+    const state = this._hass.states[this._config.mode_entity];
+    if (!state) {
+      this._modeActive = false;
+      this._modeRemaining = '';
+      return;
+    }
+    this._modeActive = state.state === 'on';
+    const remaining = state.attributes?.mode_remaining_seconds;
+    if (typeof remaining === 'number' && remaining > 0) {
+      const h = Math.floor(remaining / 3600);
+      const m = Math.floor((remaining % 3600) / 60);
+      this._modeRemaining = h > 0 ? `${h}h ${m}m` : `${m}m`;
+    } else {
+      this._modeRemaining = '';
+    }
   }
 
   async _refresh() {
@@ -77,9 +165,8 @@ class GatekeeperCard extends LitElement {
     this._setLoading(true);
 
     try {
-      const [tokensResult, modeState, urlResult] = await Promise.all([
+      const [tokensResult, urlResult] = await Promise.all([
         this._hass.callService('gatekeeper', 'get_tokens', {}, { return_response: true }),
-        this._getModeState(),
         this._hass.callService('gatekeeper', 'get_guest_url', {}, { return_response: true }),
       ]);
 
@@ -94,32 +181,14 @@ class GatekeeperCard extends LitElement {
         }
       }
 
-      this._modeActive = modeState;
+      this._readModeStateFromHass();
       this._error = '';
+      this._initialLoadDone = true;
     } catch (e) {
       this._error = 'Failed to load Gatekeeper data: ' + e.message;
     }
 
     this._setLoading(false);
-  }
-
-  async _getModeState() {
-    try {
-      const state = this._hass.states['binary_sensor.guest_mode_active'];
-      // Populate the remaining-time string so the header reflects auto-disable countdown.
-      const remaining = state?.attributes?.mode_remaining_seconds;
-      if (typeof remaining === 'number' && remaining > 0) {
-        const h = Math.floor(remaining / 3600);
-        const m = Math.floor((remaining % 3600) / 60);
-        this._modeRemaining = h > 0 ? `${h}h ${m}m` : `${m}m`;
-      } else {
-        this._modeRemaining = '';
-      }
-      return state?.state === 'on';
-    } catch {
-      this._modeRemaining = '';
-      return false;
-    }
   }
 
   async _createToken(e) {
@@ -129,35 +198,65 @@ class GatekeeperCard extends LitElement {
 
     this._setLoading(true);
     this._newToken = null;
+    this._secretRevealed = false;
     this._error = '';
 
     try {
-      const result = await this._hass.callService('gatekeeper', 'create_token', {
+      const payload = {
         label: data.get('label') || 'Guest',
         duration: parseInt(data.get('duration'), 10) || this._config.default_duration,
         scoped_entities: (data.get('entities') || 'light.*').split(',').map(s => s.trim()),
         scoped_domains: (data.get('domains') || 'light,switch,climate').split(',').map(s => s.trim()),
         allowed_services: data.get('services') ? data.get('services').split(',').map(s => s.trim()) : null,
-      }, { return_response: true });
+      };
+      const maxUsesRaw = data.get('max_uses');
+      if (maxUsesRaw !== null && maxUsesRaw !== '') {
+        const maxUses = parseInt(maxUsesRaw, 10);
+        if (!Number.isNaN(maxUses) && maxUses >= 0) {
+          payload.max_uses = maxUses;
+        }
+      }
+
+      const result = await this._hass.callService(
+        'gatekeeper', 'create_token', payload, { return_response: true },
+      );
 
       if (result?.response) {
         this._newToken = result.response;
+        this._scheduleSecretClear();
       }
 
       this._showCreateForm = false;
-      await this._refresh();
-    } catch (e) {
-      this._error = 'Failed to create token: ' + e.message;
+      // The integration will fire gatekeeper_token_created → event subscription
+      // triggers _refresh. No need to call it here.
+    } catch (err) {
+      this._error = 'Failed to create token: ' + err.message;
     }
 
     this._setLoading(false);
+  }
+
+  _scheduleSecretClear() {
+    if (this._secretClearTimer) clearTimeout(this._secretClearTimer);
+    this._secretClearTimer = setTimeout(() => {
+      this._dismissNewToken();
+    }, SECRET_REVEAL_TIMEOUT_MS);
+  }
+
+  _dismissNewToken() {
+    this._newToken = null;
+    this._secretRevealed = false;
+    if (this._secretClearTimer) {
+      clearTimeout(this._secretClearTimer);
+      this._secretClearTimer = null;
+    }
   }
 
   async _revokeToken(tokenId) {
     this._setLoading(true);
     try {
       await this._hass.callService('gatekeeper', 'revoke_token', { token_id: tokenId });
-      await this._refresh();
+      // gatekeeper_token_revoked event will trigger refresh.
     } catch (e) {
       this._error = 'Failed to revoke token: ' + e.message;
     }
@@ -170,12 +269,16 @@ class GatekeeperCard extends LitElement {
       if (this._modeActive) {
         await this._hass.callService('gatekeeper', 'deactivate_mode', {});
       } else {
-        await this._hass.callService('gatekeeper', 'activate_mode', {
-          auto_disable_after: 48,
-          disable_automations: true,
-        });
+        const payload = { disable_automations: true };
+        // Only forward auto_disable_after when the user configured one.
+        // Otherwise rely on the integration's own default.
+        if (typeof this._config.auto_disable_after === 'number') {
+          payload.auto_disable_after = this._config.auto_disable_after;
+        }
+        await this._hass.callService('gatekeeper', 'activate_mode', payload);
       }
-      await this._refresh();
+      // gatekeeper_mode_* events will trigger refresh; also update local state.
+      this._readModeStateFromHass();
     } catch (e) {
       this._error = 'Failed to toggle guest mode: ' + e.message;
     }
@@ -194,21 +297,56 @@ class GatekeeperCard extends LitElement {
         width: 200,
         color: { dark: '#000000', light: '#ffffff' },
       });
-    } catch (e) {
-      // Fall back to no QR if the library throws (very long URL etc.).
+    } catch {
       return '';
     }
   }
 
-  _copyToClipboard(text) {
-    navigator.clipboard.writeText(text).catch(() => {});
+  async _copyToClipboard(text) {
+    // Secure-context path.
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        this._flashInfo('Copied to clipboard');
+        return;
+      } catch {
+        // fall through to fallback
+      }
+    }
+    // Fallback for HTTP origins / older browsers.
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '-1000px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      if (ok) {
+        this._flashInfo('Copied to clipboard');
+      } else {
+        this._error = 'Copy failed — select and copy manually.';
+      }
+    } catch (e) {
+      this._error = 'Copy failed: ' + e.message;
+    }
+  }
+
+  _flashInfo(msg) {
+    this._info = msg;
+    setTimeout(() => {
+      if (this._info === msg) this._info = '';
+    }, 2000);
   }
 
   _shareUrl(url) {
     // Uses the platform's native share sheet (iOS/Android). The URL is the
     // only thing shared — it stays on-device until the user picks a target.
     if (navigator.share) {
-      navigator.share({ title: 'Guest access', url: url }).catch(() => {});
+      navigator.share({ title: 'Guest access', url }).catch(() => {});
     } else {
       this._copyToClipboard(url);
     }
@@ -229,19 +367,18 @@ class GatekeeperCard extends LitElement {
 
   _getStatusClass(token) {
     if (!token.is_active) return 'status-revoked';
-    // expires_at may already have a timezone suffix — only append 'Z' if bare.
     const stamp = /Z$|[+-]\d{2}:?\d{2}$/.test(token.expires_at)
       ? token.expires_at : token.expires_at + 'Z';
     const expires = new Date(stamp);
     const now = new Date();
     const diff = expires - now;
-    if (diff < 3600000) return 'status-expiring'; // < 1h
-    if (diff < 86400000) return 'status-soon';    // < 24h
+    if (diff < 3600000) return 'status-expiring';
+    if (diff < 86400000) return 'status-soon';
     return 'status-ok';
   }
 
   render() {
-    if (this._loading && !this._tokens.length) {
+    if (this._loading && !this._initialLoadDone) {
       return html`<ha-card><div class="loading">Loading...</div></ha-card>`;
     }
 
@@ -249,16 +386,24 @@ class GatekeeperCard extends LitElement {
       <ha-card>
         <div class="header">
           <h2>${this._config.title}</h2>
-          <div class="mode-toggle">
-            <span class="mode-label">Guest Mode</span>
-            <ha-switch
-              .checked=${this._modeActive}
-              @change=${this._toggleMode}
-            ></ha-switch>
+          <div class="header-actions">
+            <ha-icon-button
+              class="refresh-btn"
+              title="Refresh"
+              @click=${() => this._refresh()}
+            >↻</ha-icon-button>
+            <div class="mode-toggle">
+              <span class="mode-label">Guest Mode</span>
+              <ha-switch
+                .checked=${this._modeActive}
+                @change=${this._toggleMode}
+              ></ha-switch>
+            </div>
           </div>
         </div>
 
         ${this._error ? html`<div class="error-banner">${this._error}</div>` : ''}
+        ${this._info ? html`<div class="info-banner">${this._info}</div>` : ''}
 
         ${this._modeActive ? html`
           <div class="mode-banner active">
@@ -269,11 +414,11 @@ class GatekeeperCard extends LitElement {
           <div class="mode-banner inactive">Guest mode off</div>
         `}
 
-        <!-- Active Tokens -->
         <div class="section">
           <div class="section-header">
             <h3>Active Tokens (${this._tokens.length})</h3>
             <ha-button
+              type="button"
               @click=${() => this._showCreateForm = !this._showCreateForm}
             >+ New Token</ha-button>
           </div>
@@ -286,7 +431,6 @@ class GatekeeperCard extends LitElement {
           ` : this._tokens.map(t => this._renderToken(t))}
         </div>
 
-        <!-- Guest link share -->
         ${this._guestUrl ? html`
           <div class="section qr-section">
             <h3>Guest Access QR</h3>
@@ -299,9 +443,9 @@ class GatekeeperCard extends LitElement {
             ` : ''}
             <div class="url-display">
               <input type="text" .value=${this._guestUrl} readonly />
-              <ha-button @click=${() => this._copyToClipboard(this._guestUrl)}>Copy</ha-button>
+              <ha-button type="button" @click=${() => this._copyToClipboard(this._guestUrl)}>Copy</ha-button>
               ${navigator.share ? html`
-                <ha-button @click=${() => this._shareUrl(this._guestUrl)}>Share</ha-button>
+                <ha-button type="button" @click=${() => this._shareUrl(this._guestUrl)}>Share</ha-button>
               ` : ''}
             </div>
           </div>
@@ -333,8 +477,12 @@ class GatekeeperCard extends LitElement {
           <span>Allowed services</span>
           <input type="text" name="services" placeholder="light.turn_on, lock.unlock" />
         </label>
+        <label>
+          <span>Max uses (0 = unlimited)</span>
+          <input type="number" name="max_uses" min="0" max="10000" placeholder="0" />
+        </label>
         <div class="form-actions">
-          <ha-button @click=${() => this._showCreateForm = false}>Cancel</ha-button>
+          <ha-button type="button" @click=${() => this._showCreateForm = false}>Cancel</ha-button>
           <ha-button variant="filled" type="submit">Create Token</ha-button>
         </div>
       </form>
@@ -343,20 +491,35 @@ class GatekeeperCard extends LitElement {
 
   _renderNewTokenResult() {
     if (!this._newToken) return '';
+    const secretType = this._secretRevealed ? 'text' : 'password';
     return html`
       <div class="new-token-banner">
-        <strong>Token created!</strong>
+        <div class="new-token-header">
+          <strong>Token created!</strong>
+          <ha-button
+            type="button"
+            class="dismiss-btn"
+            @click=${() => this._dismissNewToken()}
+          >Dismiss</ha-button>
+        </div>
         <div class="token-detail">
           <span>Guest URL:</span>
-          <input type="text" .value=${this._newToken.guest_url} readonly />
-          <ha-button @click=${() => this._copyToClipboard(this._newToken.guest_url)}>Copy</ha-button>
+          <input type="text" .value=${this._newToken.guest_url || ''} readonly />
+          <ha-button type="button" @click=${() => this._copyToClipboard(this._newToken.guest_url)}>Copy</ha-button>
         </div>
         <div class="token-detail">
           <span>Secret:</span>
-          <input type="text" .value=${this._newToken.secret} readonly />
-          <ha-button @click=${() => this._copyToClipboard(this._newToken.secret)}>Copy</ha-button>
+          <input type=${secretType} .value=${this._newToken.secret || ''} readonly />
+          <ha-button
+            type="button"
+            @click=${() => this._secretRevealed = !this._secretRevealed}
+          >${this._secretRevealed ? 'Hide' : 'Reveal'}</ha-button>
+          <ha-button type="button" @click=${() => this._copyToClipboard(this._newToken.secret)}>Copy</ha-button>
         </div>
-        <p class="token-warning">This is the only time the secret is shown. Save it now.</p>
+        <p class="token-warning">
+          This is the only time the secret is shown. Save it now.
+          It will auto-dismiss in ${Math.round(SECRET_REVEAL_TIMEOUT_MS / 1000)}s.
+        </p>
       </div>
     `;
   }
@@ -370,10 +533,12 @@ class GatekeeperCard extends LitElement {
           <div class="token-meta">
             Expires ${this._formatExpiry(token.expires_at)}
             ${token.use_count > 0 ? html`&middot; ${token.use_count} uses` : ''}
+            ${token.max_uses ? html`&middot; max ${token.max_uses}` : ''}
           </div>
         </div>
         <div class="token-actions">
           <ha-button
+            type="button"
             class="revoke-btn"
             @click=${() => this._revokeToken(token.token_id)}
           >Revoke</ha-button>
@@ -390,64 +555,103 @@ class GatekeeperCard extends LitElement {
         display: flex; justify-content: space-between; align-items: center;
         margin-bottom: 12px;
       }
-      .header h2 { margin: 0; font-size: 1.2rem; }
+      .header h2 { margin: 0; font-size: 1.2rem; color: var(--primary-text-color); }
+      .header-actions { display: flex; align-items: center; gap: 8px; }
+      .refresh-btn {
+        background: transparent; border: none; cursor: pointer;
+        color: var(--secondary-text-color); font-size: 1.1rem;
+      }
       .mode-toggle { display: flex; align-items: center; gap: 8px; }
-      .mode-label { font-size: 0.85rem; opacity: 0.7; }
+      .mode-label { font-size: 0.85rem; color: var(--secondary-text-color); }
       .mode-banner {
         padding: 10px 16px; border-radius: 8px; margin-bottom: 16px;
         font-weight: 500; font-size: 0.9rem;
       }
-      .mode-banner.active { background: #1b5e20; color: #a5d6a7; }
-      .mode-banner.inactive { background: #333; color: #999; }
+      .mode-banner.active {
+        background: var(--success-color, #1b5e20);
+        color: var(--text-primary-color, #fff);
+      }
+      .mode-banner.inactive {
+        background: var(--secondary-background-color, #f0f0f0);
+        color: var(--secondary-text-color, #666);
+      }
       .section { margin-bottom: 16px; }
       .section-header {
         display: flex; justify-content: space-between; align-items: center;
         margin-bottom: 8px;
       }
-      .section-header h3 { margin: 0; font-size: 1rem; }
-      .empty-state { padding: 16px; text-align: center; opacity: 0.5; font-style: italic; }
+      .section-header h3 { margin: 0; font-size: 1rem; color: var(--primary-text-color); }
+      .empty-state {
+        padding: 16px; text-align: center; font-style: italic;
+        color: var(--secondary-text-color);
+      }
       .token-card {
         display: flex; justify-content: space-between; align-items: center;
-        padding: 10px 12px; background: #1e1e1e; border-radius: 8px; margin-bottom: 8px;
+        padding: 10px 12px;
+        background: var(--secondary-background-color, var(--card-background-color));
+        border-radius: 8px; margin-bottom: 8px;
         border-left: 3px solid transparent;
+        color: var(--primary-text-color);
       }
-      .token-card.status-ok { border-left-color: #4caf50; }
-      .token-card.status-soon { border-left-color: #ff9800; }
-      .token-card.status-expiring { border-left-color: #f44336; }
-      .token-card.status-revoked { opacity: 0.4; border-left-color: #666; }
+      .token-card.status-ok { border-left-color: var(--success-color, #4caf50); }
+      .token-card.status-soon { border-left-color: var(--warning-color, #ff9800); }
+      .token-card.status-expiring { border-left-color: var(--error-color, #f44336); }
+      .token-card.status-revoked { opacity: 0.4; border-left-color: var(--divider-color, #666); }
       .token-label { font-weight: 500; }
-      .token-meta { font-size: 0.8rem; opacity: 0.6; margin-top: 2px; }
+      .token-meta { font-size: 0.8rem; color: var(--secondary-text-color); margin-top: 2px; }
       .create-form {
-        background: #1e1e1e; border-radius: 8px; padding: 16px; margin-bottom: 12px;
+        background: var(--secondary-background-color, var(--card-background-color));
+        border-radius: 8px; padding: 16px; margin-bottom: 12px;
+        color: var(--primary-text-color);
       }
-      .create-form label {
-        display: block; margin-bottom: 10px;
-      }
+      .create-form label { display: block; margin-bottom: 10px; }
       .create-form label span {
-        display: block; font-size: 0.8rem; opacity: 0.7; margin-bottom: 4px;
+        display: block; font-size: 0.8rem;
+        color: var(--secondary-text-color); margin-bottom: 4px;
       }
       .create-form input {
-        width: 100%; padding: 8px; border: 1px solid #333; border-radius: 6px;
-        background: #2a2a2a; color: #eee; font-size: 0.85rem;
+        width: 100%; padding: 8px;
+        border: 1px solid var(--divider-color, #333);
+        border-radius: 6px;
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+        font-size: 0.85rem;
       }
       .form-actions {
         display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px;
       }
       .new-token-banner {
-        background: #1b5e20; border-radius: 8px; padding: 12px; margin-bottom: 12px;
+        background: var(--secondary-background-color, var(--card-background-color));
+        border: 1px solid var(--success-color, #2e7d32);
+        border-radius: 8px; padding: 12px; margin-bottom: 12px;
+        color: var(--primary-text-color);
       }
-      .new-token-banner strong { color: #a5d6a7; }
+      .new-token-header {
+        display: flex; justify-content: space-between; align-items: center;
+        margin-bottom: 8px;
+      }
+      .new-token-banner strong { color: var(--success-color, #2e7d32); }
       .token-detail {
         display: flex; align-items: center; gap: 8px; margin-top: 8px;
+        flex-wrap: wrap;
       }
-      .token-detail span { font-size: 0.8rem; opacity: 0.7; white-space: nowrap; }
+      .token-detail span {
+        font-size: 0.8rem; color: var(--secondary-text-color); white-space: nowrap;
+      }
       .token-detail input {
-        flex: 1; padding: 4px 8px; border: 1px solid #2e7d32; border-radius: 4px;
-        background: #2a2a2a; color: #eee; font-size: 0.8rem;
+        flex: 1; min-width: 120px;
+        padding: 4px 8px;
+        border: 1px solid var(--divider-color);
+        border-radius: 4px;
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+        font-size: 0.8rem;
       }
-      .token-warning { font-size: 0.75rem; opacity: 0.6; margin-top: 8px; }
+      .token-warning {
+        font-size: 0.75rem; color: var(--secondary-text-color); margin-top: 8px;
+      }
       .qr-section { text-align: center; }
-      .qr-hint { font-size: 0.85rem; opacity: 0.6; }
+      .qr-hint { font-size: 0.85rem; color: var(--secondary-text-color); }
       .qr-code {
         width: 200px;
         height: 200px;
@@ -460,18 +664,32 @@ class GatekeeperCard extends LitElement {
         justify-content: center;
       }
       .qr-code svg { width: 100%; height: 100%; display: block; }
-      .url-display {
-        display: flex; gap: 8px; margin-top: 8px;
-      }
+      .url-display { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
       .url-display input {
-        flex: 1; padding: 6px; border: 1px solid #333; border-radius: 6px;
-        background: #2a2a2a; color: #eee; font-size: 0.8rem;
+        flex: 1; min-width: 120px;
+        padding: 6px;
+        border: 1px solid var(--divider-color);
+        border-radius: 6px;
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+        font-size: 0.8rem;
       }
       .error-banner {
-        background: #b71c1c; color: #ef9a9a; padding: 8px 12px; border-radius: 6px;
+        background: var(--error-color, #b71c1c);
+        color: var(--text-primary-color, #fff);
+        padding: 8px 12px; border-radius: 6px;
         margin-bottom: 12px; font-size: 0.85rem;
       }
-      .loading { padding: 24px; text-align: center; opacity: 0.5; }
+      .info-banner {
+        background: var(--info-color, var(--primary-color, #1976d2));
+        color: var(--text-primary-color, #fff);
+        padding: 6px 12px; border-radius: 6px;
+        margin-bottom: 12px; font-size: 0.85rem;
+      }
+      .loading {
+        padding: 24px; text-align: center;
+        color: var(--secondary-text-color);
+      }
     `;
   }
 }
@@ -479,14 +697,13 @@ class GatekeeperCard extends LitElement {
 // HA uses getCardSize() to compute view layout. Without it the card defaults
 // to size 1 and can be cropped or jammed against neighbouring cards.
 GatekeeperCard.prototype.getCardSize = function () {
-  const baseRows = 3; // header + toggle + section title
+  const baseRows = 3;
   const tokenRows = Math.max(1, (this._tokens || []).length);
   return baseRows + tokenRows + (this._guestUrl ? 2 : 0);
 };
 
 customElements.define('gatekeeper-card', GatekeeperCard);
 
-// Register card type for HA
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: 'gatekeeper-card',
