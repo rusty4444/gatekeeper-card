@@ -46,10 +46,16 @@ class GatekeeperCard extends LitElement {
     this._modeRemaining = '';
     this._guestUrl = '';
     this._qrSvg = '';
-    this._loading = true;
+    this._loadingCount = 0;
+    this._loading = false;
     this._newToken = null;
     this._showCreateForm = false;
     this._error = '';
+  }
+
+  _setLoading(active) {
+    this._loadingCount += active ? 1 : -1;
+    this._loading = this._loadingCount > 0;
   }
 
   set hass(hass) {
@@ -68,7 +74,7 @@ class GatekeeperCard extends LitElement {
 
   async _refresh() {
     if (!this._hass) return;
-    this._loading = true;
+    this._setLoading(true);
 
     try {
       const [tokensResult, modeState, urlResult] = await Promise.all([
@@ -94,7 +100,7 @@ class GatekeeperCard extends LitElement {
       this._error = 'Failed to load Gatekeeper data: ' + e.message;
     }
 
-    this._loading = false;
+    this._setLoading(false);
   }
 
   async _getModeState() {
@@ -121,14 +127,14 @@ class GatekeeperCard extends LitElement {
     const form = e.target;
     const data = new FormData(form);
 
-    this._loading = true;
+    this._setLoading(true);
     this._newToken = null;
     this._error = '';
 
     try {
       const result = await this._hass.callService('gatekeeper', 'create_token', {
         label: data.get('label') || 'Guest',
-        duration: parseInt(data.get('duration')) || this._config.default_duration,
+        duration: parseInt(data.get('duration'), 10) || this._config.default_duration,
         scoped_entities: (data.get('entities') || 'light.*').split(',').map(s => s.trim()),
         scoped_domains: (data.get('domains') || 'light,switch,climate').split(',').map(s => s.trim()),
         allowed_services: data.get('services') ? data.get('services').split(',').map(s => s.trim()) : null,
@@ -144,22 +150,22 @@ class GatekeeperCard extends LitElement {
       this._error = 'Failed to create token: ' + e.message;
     }
 
-    this._loading = false;
+    this._setLoading(false);
   }
 
   async _revokeToken(tokenId) {
-    this._loading = true;
+    this._setLoading(true);
     try {
       await this._hass.callService('gatekeeper', 'revoke_token', { token_id: tokenId });
       await this._refresh();
     } catch (e) {
       this._error = 'Failed to revoke token: ' + e.message;
     }
-    this._loading = false;
+    this._setLoading(false);
   }
 
   async _toggleMode() {
-    this._loading = true;
+    this._setLoading(true);
     try {
       if (this._modeActive) {
         await this._hass.callService('gatekeeper', 'deactivate_mode', {});
@@ -173,7 +179,7 @@ class GatekeeperCard extends LitElement {
     } catch (e) {
       this._error = 'Failed to toggle guest mode: ' + e.message;
     }
-    this._loading = false;
+    this._setLoading(false);
   }
 
   async _renderQr(text) {
@@ -223,7 +229,10 @@ class GatekeeperCard extends LitElement {
 
   _getStatusClass(token) {
     if (!token.is_active) return 'status-revoked';
-    const expires = new Date(token.expires_at + 'Z');
+    // expires_at may already have a timezone suffix — only append 'Z' if bare.
+    const stamp = /Z$|[+-]\d{2}:?\d{2}$/.test(token.expires_at)
+      ? token.expires_at : token.expires_at + 'Z';
+    const expires = new Date(stamp);
     const now = new Date();
     const diff = expires - now;
     if (diff < 3600000) return 'status-expiring'; // < 1h
