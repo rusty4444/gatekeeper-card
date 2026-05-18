@@ -15,7 +15,19 @@ A **Lovelace dashboard card** for [Gatekeeper HA](https://github.com/rusty4444/g
 
 ## Installation
 
-### Via HACS (recommended)
+### 1. Install the Gatekeeper HA Integration
+
+This card requires the [Gatekeeper HA](https://github.com/rusty4444/gatekeeper-ha) integration to be installed first.
+
+1. In HACS, add as a **Custom Repository**:
+   - URL: `https://github.com/rusty4444/gatekeeper-ha`
+   - Category: Integration
+2. Download and install the **Gatekeeper HA** integration
+3. Restart Home Assistant
+4. Go to **Settings → Devices & Services → Add Integration**
+5. Search for "Gatekeeper HA" and configure the guest page port (default: 8921)
+
+### 2. Install the Card via HACS (recommended)
 
 1. Add this repository as a **Custom Repository** in HACS:
    - **URL:** `https://github.com/rusty4444/gatekeeper-card`
@@ -34,7 +46,7 @@ A **Lovelace dashboard card** for [Gatekeeper HA](https://github.com/rusty4444/g
    type: custom:gatekeeper-card
    ```
 
-### Manual Installation
+### 3. Manual Installation
 
 1. Download `gatekeeper-card.js` from the [latest release](https://github.com/rusty4444/gatekeeper-card/releases).
 
@@ -67,7 +79,6 @@ The card displays:
 
 ## Prerequisites
 
-- [Gatekeeper HA](https://github.com/rusty4444/gatekeeper-ha) integration must be installed
 - Home Assistant 2023.8+ (for `return_response` service call support)
 
 ## Development
