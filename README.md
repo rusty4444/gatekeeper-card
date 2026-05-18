@@ -85,6 +85,8 @@ npm run watch
 
 The build output is written to `dist/gatekeeper-card.js`.
 
+This project was developed with the assistance of AI tools.
+
 ## License
 
 MIT
