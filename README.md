@@ -35,7 +35,7 @@ This card requires the [Gatekeeper HA](https://github.com/rusty4444/gatekeeper-h
 
 1. Add this repository as a **Custom Repository** in HACS:
    - **URL:** `https://github.com/rusty4444/gatekeeper-card`
-   - **Type:** `Lovelace`
+   - **Category:** `Dashboard`
 
 2. Search for "Gatekeeper Guest Portal" in HACS and install.
 
