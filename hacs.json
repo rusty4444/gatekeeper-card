@@ -1,6 +1,5 @@
 {
   "name": "Gatekeeper Guest Portal",
   "render_readme": true,
-  "filename": "gatekeeper-card.js",
-  "type": "module"
+  "filename": "gatekeeper-card.js"
 }
