@@ -165,12 +165,11 @@ class GatekeeperCard extends LitElement {
     this._setLoading(true);
 
     try {
-      // HA 2026.5+ deprecation: return_response replaced by response_variable.
-      // response_variable: 'response' stores the service response under result.response,
-      // preserving the same access pattern as the old return_response.
+      // Pass true as the 5th arg (returnResponse) to get service responses.
+      // The frontend handles response_variable plumbing internally.
       const [tokensResult, urlResult] = await Promise.all([
-        this._hass.callService('gatekeeper', 'get_tokens', {}, { response_variable: 'response' }),
-        this._hass.callService('gatekeeper', 'get_guest_url', {}, { response_variable: 'response' }),
+        this._hass.callService('gatekeeper', 'get_tokens', {}, {}, true),
+        this._hass.callService('gatekeeper', 'get_guest_url', {}, {}, true),
       ]);
 
       this._tokens = tokensResult?.response?.tokens || [];
