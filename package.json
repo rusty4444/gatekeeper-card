@@ -1,7 +1,8 @@
 {
   "name": "gatekeeper-card",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Gatekeeper HA — Guest access management Lovelace card",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "build": "rollup -c",

@@ -165,9 +165,11 @@ class GatekeeperCard extends LitElement {
     this._setLoading(true);
 
     try {
+      // Pass true as the 5th arg (returnResponse) to get service responses.
+      // The frontend handles response_variable plumbing internally.
       const [tokensResult, urlResult] = await Promise.all([
-        this._hass.callService('gatekeeper', 'get_tokens', {}, {}, false, true),
-        this._hass.callService('gatekeeper', 'get_guest_url', {}, {}, false, true),
+        this._hass.callService('gatekeeper', 'get_tokens', {}, {}, true),
+        this._hass.callService('gatekeeper', 'get_guest_url', {}, {}, true),
       ]);
 
       this._tokens = tokensResult?.response?.tokens || [];
@@ -218,7 +220,7 @@ class GatekeeperCard extends LitElement {
       }
 
       const result = await this._hass.callService(
-        'gatekeeper', 'create_token', payload, {}, false, true,
+        'gatekeeper', 'create_token', payload, { response_variable: 'response' },
       );
 
       if (result?.response) {
