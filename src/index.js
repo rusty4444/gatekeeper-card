@@ -271,7 +271,7 @@ class GatekeeperCard extends LitElement {
       if (this._modeActive) {
         await this._hass.callService('gatekeeper', 'deactivate_mode', {});
       } else {
-        const payload = { disable_automations: true };
+        const payload = {};
         // Only forward auto_disable_after when the user configured one.
         // Otherwise rely on the integration's own default.
         if (typeof this._config.auto_disable_after === 'number') {
