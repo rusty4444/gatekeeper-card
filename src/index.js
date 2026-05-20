@@ -166,8 +166,8 @@ class GatekeeperCard extends LitElement {
 
     try {
       const [tokensResult, urlResult] = await Promise.all([
-        this._hass.callService('gatekeeper', 'get_tokens', {}, { return_response: true }),
-        this._hass.callService('gatekeeper', 'get_guest_url', {}, { return_response: true }),
+        this._hass.callService('gatekeeper', 'get_tokens', {}, {}, false, true),
+        this._hass.callService('gatekeeper', 'get_guest_url', {}, {}, false, true),
       ]);
 
       this._tokens = tokensResult?.response?.tokens || [];
@@ -218,7 +218,7 @@ class GatekeeperCard extends LitElement {
       }
 
       const result = await this._hass.callService(
-        'gatekeeper', 'create_token', payload, { return_response: true },
+        'gatekeeper', 'create_token', payload, {}, false, true,
       );
 
       if (result?.response) {
@@ -269,7 +269,7 @@ class GatekeeperCard extends LitElement {
       if (this._modeActive) {
         await this._hass.callService('gatekeeper', 'deactivate_mode', {});
       } else {
-        const payload = { disable_automations: true };
+        const payload = {};
         // Only forward auto_disable_after when the user configured one.
         // Otherwise rely on the integration's own default.
         if (typeof this._config.auto_disable_after === 'number') {
