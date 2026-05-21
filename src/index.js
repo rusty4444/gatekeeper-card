@@ -166,8 +166,8 @@ class GatekeeperCard extends LitElement {
 
     try {
       const [tokensResult, urlResult] = await Promise.all([
-        this._hass.callService('gatekeeper', 'get_tokens', {}, {}, false, true),
-        this._hass.callService('gatekeeper', 'get_guest_url', {}, {}, false, true),
+        this._hass.callWS({ type: 'call_service', domain: 'gatekeeper', service: 'get_tokens', return_response: true }),
+        this._hass.callWS({ type: 'call_service', domain: 'gatekeeper', service: 'get_guest_url', return_response: true }),
       ]);
 
       this._tokens = tokensResult?.response?.tokens || [];
@@ -217,9 +217,10 @@ class GatekeeperCard extends LitElement {
         }
       }
 
-      const result = await this._hass.callService(
-        'gatekeeper', 'create_token', payload, {}, false, true,
-      );
+      const result = await this._hass.callWS({
+        type: 'call_service', domain: 'gatekeeper', service: 'create_token',
+        service_data: payload, return_response: true,
+      });
 
       if (result?.response) {
         this._newToken = result.response;
