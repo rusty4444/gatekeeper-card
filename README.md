@@ -3,6 +3,13 @@
 </p>
 
 <h1 align="center">Gatekeeper Guest Portal — Lovelace Card</h1>
+<p align="center">
+  <a href="https://buymeacoffee.com/rusty4" target="_blank">
+    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
+  </a>
+</p>
+
+
 
 <p align="center"><strong>A Lovelace dashboard card for <a href="https://github.com/rusty4444/gatekeeper-ha">Gatekeeper HA</a> that provides a full UI for managing guest access tokens and toggling guest mode — all from your Home Assistant dashboard.</strong></p>
 
