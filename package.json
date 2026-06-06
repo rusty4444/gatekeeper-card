@@ -18,6 +18,6 @@
     "@rollup/plugin-node-resolve": "^15.0.0",
     "@rollup/plugin-terser": "^0.4.0",
     "eslint": "^8.57.0",
-    "rollup": "^4.0.0"
+    "rollup": "^4.61.0"
   }
 }
