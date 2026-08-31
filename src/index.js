@@ -217,6 +217,9 @@ class GatekeeperCard extends LitElement {
         }
       }
 
+      // Expose Wi-Fi credentials on the guest page for this token.
+      payload.show_wifi = data.get('show_wifi') === 'on';
+
       const result = await this._hass.callWS({
         type: 'call_service', domain: 'gatekeeper', service: 'create_token',
         service_data: payload, return_response: true,
@@ -225,11 +228,22 @@ class GatekeeperCard extends LitElement {
       if (result?.response) {
         this._newToken = result.response;
         this._scheduleSecretClear();
+
+        // The new token has its own guest URL. Show it (and its QR) right
+        // away instead of waiting for the event-triggered refresh, which is
+        // not reliable when event subscriptions are unavailable.
+        const newGuestUrl = result.response.guest_url || '';
+        if (newGuestUrl && newGuestUrl !== this._guestUrl) {
+          this._guestUrl = newGuestUrl;
+          this._qrSvg = await this._renderQr(newGuestUrl);
+        }
       }
 
       this._showCreateForm = false;
-      // The integration will fire gatekeeper_token_created → event subscription
-      // triggers _refresh. No need to call it here.
+      // Refresh the token list immediately; do not rely solely on the
+      // gatekeeper_token_created event, since event subscription can fail
+      // (older HA, missing perms).
+      await this._refresh();
     } catch (err) {
       this._error = 'Failed to create token: ' + err.message;
     }
@@ -482,6 +496,10 @@ class GatekeeperCard extends LitElement {
           <span>Max uses (0 = unlimited)</span>
           <input type="number" name="max_uses" min="0" max="10000" placeholder="0" />
         </label>
+        <label class="checkbox-label">
+          <input type="checkbox" name="show_wifi" />
+          <span>Expose Wi-Fi credentials on the guest page</span>
+        </label>
         <div class="form-actions">
           <ha-button type="button" @click=${() => this._showCreateForm = false}>Cancel</ha-button>
           <ha-button variant="filled" type="submit">Create Token</ha-button>
@@ -609,6 +627,15 @@ class GatekeeperCard extends LitElement {
       .create-form label span {
         display: block; font-size: 0.8rem;
         color: var(--secondary-text-color); margin-bottom: 4px;
+      }
+      .create-form label.checkbox-label {
+        display: flex; align-items: center; gap: 8px;
+      }
+      .create-form label.checkbox-label span {
+        margin-bottom: 0; white-space: normal;
+      }
+      .create-form label.checkbox-label input {
+        width: auto; flex: 0 0 auto; cursor: pointer;
       }
       .create-form input {
         width: 100%; padding: 8px;
