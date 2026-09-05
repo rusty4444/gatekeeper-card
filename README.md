@@ -77,6 +77,7 @@ This card requires the [Gatekeeper HA](https://github.com/rusty4444/gatekeeper-h
 type: custom:gatekeeper-card
 title: "Guest Access"                       # Card title (default: "Guest Access")
 show_qr: true                               # Show QR code (default: true)
+show_remaining_uses: true                   # Show remaining uses per token (default: false)
 default_duration: 24                        # Default token duration in hours (default: 24)
 mode_entity: binary_sensor.guest_mode_active # Entity to read guest-mode state from (default shown)
 # auto_disable_after: 24                    # Optional; if unset the integration's own default applies

@@ -11,6 +11,7 @@
  *   type: custom:gatekeeper-card
  *   title: "Guest Access"
  *   show_qr: true
+ *   show_remaining_uses: false
  *   default_duration: 24
  *   mode_entity: binary_sensor.guest_mode_active
  *   auto_disable_after: 0       # optional; if unset, integration default applies
@@ -134,6 +135,7 @@ class GatekeeperCard extends LitElement {
     this._config = {
       title: 'Guest Access',
       show_qr: true,
+      show_remaining_uses: false,
       default_duration: 24,
       mode_entity: 'binary_sensor.guest_mode_active',
       // auto_disable_after intentionally omitted — only sent if user sets it.
@@ -545,6 +547,9 @@ class GatekeeperCard extends LitElement {
 
   _renderToken(token) {
     const statusClass = this._getStatusClass(token);
+    const remainingUses = token.max_uses
+      ? Math.max(0, token.max_uses - (token.use_count || 0))
+      : null;
     return html`
       <div class="token-card ${statusClass}">
         <div class="token-info">
@@ -553,6 +558,7 @@ class GatekeeperCard extends LitElement {
             Expires ${this._formatExpiry(token.expires_at)}
             ${token.use_count > 0 ? html`&middot; ${token.use_count} uses` : ''}
             ${token.max_uses ? html`&middot; max ${token.max_uses}` : ''}
+            ${this._config.show_remaining_uses && remainingUses !== null ? html`&middot; ${remainingUses} remaining` : ''}
           </div>
         </div>
         <div class="token-actions">
