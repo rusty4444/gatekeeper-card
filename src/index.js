@@ -24,10 +24,141 @@
 import { LitElement, html, css } from 'lit';
 import { unsafeHTML } from 'lit/directives/unsafe-html.js';
 import QRCode from 'qrcode';
+import { DEFAULT_CARD_CONFIG, updateCardConfig } from './config.js';
 
 const SECRET_REVEAL_TIMEOUT_MS = 60_000;
 
+class GatekeeperCardEditor extends LitElement {
+  static get properties() {
+    return {
+      hass: { attribute: false },
+      _config: { state: true },
+    };
+  }
+
+  constructor() {
+    super();
+    this._config = {};
+  }
+
+  setConfig(config) {
+    this._config = { ...config };
+  }
+
+  _updateConfig(event) {
+    const config = updateCardConfig(this._config, event.currentTarget);
+
+    this._config = config;
+    this.dispatchEvent(new CustomEvent('config-changed', {
+      detail: { config },
+      bubbles: true,
+      composed: true,
+    }));
+  }
+
+  render() {
+    const config = { ...DEFAULT_CARD_CONFIG, ...this._config };
+
+    return html`
+      <div class="form">
+        <label>
+          <span>Title</span>
+          <input
+            name="title"
+            type="text"
+            .value=${config.title}
+            @input=${this._updateConfig}
+          />
+        </label>
+        <label>
+          <span>Default token duration (hours)</span>
+          <input
+            name="default_duration"
+            type="number"
+            min="1"
+            max="8760"
+            .value=${String(config.default_duration)}
+            @input=${this._updateConfig}
+          />
+        </label>
+        <label>
+          <span>Guest mode entity</span>
+          <input
+            name="mode_entity"
+            type="text"
+            .value=${config.mode_entity}
+            @input=${this._updateConfig}
+          />
+        </label>
+        <label>
+          <span>Auto-disable guest mode after (hours, optional)</span>
+          <input
+            name="auto_disable_after"
+            type="number"
+            min="0"
+            max="8760"
+            .value=${config.auto_disable_after === undefined
+              ? ''
+              : String(config.auto_disable_after)}
+            @input=${this._updateConfig}
+          />
+        </label>
+        <label class="checkbox-label">
+          <input
+            name="show_qr"
+            type="checkbox"
+            .checked=${config.show_qr}
+            @change=${this._updateConfig}
+          />
+          <span>Show QR code</span>
+        </label>
+        <label class="checkbox-label">
+          <input
+            name="show_remaining_uses"
+            type="checkbox"
+            .checked=${config.show_remaining_uses}
+            @change=${this._updateConfig}
+          />
+          <span>Show remaining clicks</span>
+        </label>
+      </div>
+    `;
+  }
+
+  static get styles() {
+    return css`
+      .form { display: grid; gap: 16px; padding: 8px 0; }
+      label { display: grid; gap: 6px; }
+      label span { color: var(--primary-text-color); font-size: 0.9rem; }
+      input[type='text'], input[type='number'] {
+        box-sizing: border-box;
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid var(--divider-color, #666);
+        border-radius: 6px;
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color, #111);
+        font: inherit;
+      }
+      .checkbox-label {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .checkbox-label input { width: 18px; height: 18px; }
+    `;
+  }
+}
+
 class GatekeeperCard extends LitElement {
+  static getConfigElement() {
+    return document.createElement('gatekeeper-card-editor');
+  }
+
+  static getStubConfig() {
+    return { ...DEFAULT_CARD_CONFIG };
+  }
+
   static get properties() {
     return {
       _hass: { type: Object },
@@ -133,12 +264,8 @@ class GatekeeperCard extends LitElement {
 
   setConfig(config) {
     this._config = {
-      title: 'Guest Access',
-      show_qr: true,
-      show_remaining_uses: false,
-      default_duration: 24,
-      mode_entity: 'binary_sensor.guest_mode_active',
       // auto_disable_after intentionally omitted — only sent if user sets it.
+      ...DEFAULT_CARD_CONFIG,
       ...config,
     };
   }
@@ -736,6 +863,7 @@ GatekeeperCard.prototype.getCardSize = function () {
   return baseRows + tokenRows + (this._guestUrl ? 2 : 0);
 };
 
+customElements.define('gatekeeper-card-editor', GatekeeperCardEditor);
 customElements.define('gatekeeper-card', GatekeeperCard);
 
 window.customCards = window.customCards || [];
