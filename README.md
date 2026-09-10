@@ -23,6 +23,7 @@
 - **QR code display** — In-browser QR code generation (no external API calls) for easy sharing.
 - **Guest URL sharing** — Copy-to-clipboard or native share sheet (iOS/Android).
 - **Token expiry indicators** — Color-coded status (ok / soon / expiring / revoked) with remaining time.
+- **Visual editor** — Configure the card from Home Assistant, including a **Show remaining clicks** checkbox for use-limited tokens.
 
 ## Installation
 
@@ -72,6 +73,8 @@ This card requires the [Gatekeeper HA](https://github.com/rusty4444/gatekeeper-h
 4. Add the card to any view.
 
 ## Configuration
+
+The Home Assistant visual card editor exposes all options below. Enable **Show remaining clicks** to display `max_uses - use_count` beside each use-limited token.
 
 ```yaml
 type: custom:gatekeeper-card
