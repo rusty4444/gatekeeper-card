@@ -45,3 +45,14 @@ test('number inputs become numbers and an empty optional value is removed', () =
   assert.equal(typeof updated.default_duration, 'number');
   assert.equal('auto_disable_after' in withoutOptional, false);
 });
+
+test('hacs.json declares bare bundle filename and valid HACS plugin keys (#66)', () => {
+  const hacs = JSON.parse(fs.readFileSync('hacs.json', 'utf8'));
+
+  assert.equal(hacs.filename, 'gatekeeper-card.js');
+  assert.equal(hacs.filename.includes('/'), false);
+  assert.equal(fs.existsSync(`dist/${hacs.filename}`), true);
+  assert.equal('type' in hacs, false);
+  assert.equal(fs.existsSync('dist/' + hacs.filename), true);
+  assert.deepEqual(Object.keys(hacs).sort(), ['filename', 'name', 'render_readme']);
+});
