@@ -53,5 +53,7 @@ test('hacs.json declares bare bundle filename and valid HACS plugin keys (#66)',
   assert.equal(hacs.filename.includes('/'), false);
   assert.equal(fs.existsSync(`dist/${hacs.filename}`), true);
   assert.equal('type' in hacs, false);
+  const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+  assert.equal(hacs.filename, path.basename(pkg.main));
   assert.deepEqual(Object.keys(hacs).sort(), ['filename', 'name', 'render_readme']);
 });
